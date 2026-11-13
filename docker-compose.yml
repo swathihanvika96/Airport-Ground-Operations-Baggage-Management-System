@@ -1,0 +1,62 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: airport_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DB:-airport_ground_ops}
+      MYSQL_USER: ${MYSQL_USER:-airport}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-airport}
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: airport_redis
+    restart: unless-stopped
+    profiles: ["redis"]          # optional: docker compose --profile redis up
+    ports:
+      - "6379:6379"
+
+  api:
+    build: .
+    container_name: airport_api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MYSQL_HOST: db
+      MYSQL_PORT: 3306
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - reports:/app/generated_reports
+
+  tests:
+    build: .
+    profiles: ["test"]           # docker compose --profile test run --rm tests
+    entrypoint: []
+    environment:
+      TEST_DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-rootpassword}@db:3306/airport_test?charset=utf8mb4
+    command: >
+      sh -c "python -c \"import pymysql; c=pymysql.connect(host='db', user='root', password='${MYSQL_ROOT_PASSWORD:-rootpassword}'); c.cursor().execute('CREATE DATABASE IF NOT EXISTS airport_test CHARACTER SET utf8mb4')\" && pytest -q"
+    user: root
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
+  reports:
